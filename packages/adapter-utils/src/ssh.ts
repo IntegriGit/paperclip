@@ -349,6 +349,29 @@ async function resolveCommandPath(command: string): Promise<string | null> {
   }
 }
 
+/**
+ * Lock down an SSH key/known-hosts temp file so OpenSSH accepts it.
+ *
+ * On Windows the POSIX `mode` passed to `fs.writeFile` is effectively ignored —
+ * the file inherits the temp directory's NTFS ACL (which can grant other local
+ * groups, e.g. a sandbox-users group). OpenSSH refuses a private key whose ACL
+ * grants anyone but the owner ("UNPROTECTED PRIVATE KEY FILE"). Reset the ACL to
+ * remove inheritance and grant only the current user (plus SYSTEM), which
+ * OpenSSH considers safe. No-op on POSIX, where the 0o600 mode already applies.
+ */
+async function hardenWindowsFilePermissions(filePath: string): Promise<void> {
+  if (process.platform !== "win32") return;
+  const user = process.env.USERNAME
+    ? `${process.env.USERDOMAIN ? `${process.env.USERDOMAIN}\\` : ""}${process.env.USERNAME}`
+    : null;
+  await new Promise<void>((resolve) => {
+    const grants = ["/inheritance:r"];
+    if (user) grants.push("/grant:r", `${user}:F`);
+    grants.push("/grant:r", "SYSTEM:F");
+    execFile("icacls", [filePath, ...grants], { windowsHide: true }, () => resolve());
+  });
+}
+
 async function withTempFile(
   prefix: string,
   contents: string,
@@ -358,6 +381,7 @@ async function withTempFile(
   const filePath = path.join(dir, "payload");
   const normalizedContents = contents.endsWith("\n") ? contents : `${contents}\n`;
   await fs.writeFile(filePath, normalizedContents, { mode, encoding: "utf8" });
+  await hardenWindowsFilePermissions(filePath);
   return {
     path: filePath,
     cleanup: async () => {

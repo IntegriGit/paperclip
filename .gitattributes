@@ -1,0 +1,8 @@
+# Skill catalog files are content-hashed at build time into
+# packages/skills-catalog/generated/catalog.json using LF line endings, and the
+# server verifies that sha256 at read time. On Windows, core.autocrlf rewrites
+# these files to CRLF on checkout, which changes their bytes and breaks the
+# runtime hash check ("Pinned catalog file hash mismatch ..."). Force LF so the
+# on-disk content matches the pinned hashes on every platform.
+packages/skills-catalog/catalog/** text=auto eol=lf
+packages/skills-catalog/generated/catalog.json text=auto eol=lf
