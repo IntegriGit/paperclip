@@ -38,6 +38,7 @@ export interface EnvironmentCapabilities {
 
 const REMOTE_MANAGED_ADAPTERS = new Set<AgentAdapterType>([
   "acpx_local",
+  "antigravity_local",
   "claude_local",
   "codex_local",
   "cursor",

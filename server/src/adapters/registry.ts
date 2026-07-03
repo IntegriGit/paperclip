@@ -23,6 +23,17 @@ import {
   models as acpxModels,
 } from "@paperclipai/adapter-acpx-local";
 import {
+  execute as antigravityExecute,
+  listAntigravitySkills,
+  syncAntigravitySkills,
+  testEnvironment as antigravityTestEnvironment,
+  sessionCodec as antigravitySessionCodec,
+} from "@paperclipai/adapter-antigravity-local/server";
+import {
+  agentConfigurationDoc as antigravityAgentConfigurationDoc,
+  models as antigravityModels,
+} from "@paperclipai/adapter-antigravity-local";
+import {
   execute as claudeExecute,
   listClaudeSkills,
   syncClaudeSkills,
@@ -92,6 +103,15 @@ import {
   agentConfigurationDoc as grokAgentConfigurationDoc,
   models as grokModels,
 } from "@paperclipai/adapter-grok-local";
+import {
+  execute as litellmExecute,
+  testEnvironment as litellmTestEnvironment,
+  sessionCodec as litellmSessionCodec,
+} from "@paperclipai/adapter-litellm-local/server";
+import {
+  agentConfigurationDoc as litellmAgentConfigurationDoc,
+  models as litellmModels,
+} from "@paperclipai/adapter-litellm-local";
 import {
   createHermesGatewayServerAdapter,
   createHermesLocalServerAdapter,
@@ -325,6 +345,27 @@ const geminiLocalAdapter: ServerAdapterModule = {
   agentConfigurationDoc: geminiAgentConfigurationDoc,
 };
 
+const antigravityLocalAdapter: ServerAdapterModule = {
+  type: "antigravity_local",
+  execute: antigravityExecute,
+  testEnvironment: antigravityTestEnvironment,
+  listSkills: listAntigravitySkills,
+  syncSkills: syncAntigravitySkills,
+  sessionCodec: antigravitySessionCodec,
+  sessionManagement: getAdapterSessionManagement("antigravity_local") ?? undefined,
+  models: antigravityModels,
+  supportsLocalAgentJwt: true,
+  supportsInstructionsBundle: true,
+  instructionsPathKey: "instructionsFilePath",
+  requiresMaterializedRuntimeSkills: true,
+  getRuntimeCommandSpec: (config) => ({
+    command: readConfiguredCommand(config, "agy"),
+    detectCommand: readConfiguredCommand(config, "agy"),
+    installCommand: null,
+  }),
+  agentConfigurationDoc: antigravityAgentConfigurationDoc,
+};
+
 const grokLocalAdapter: ServerAdapterModule = {
   type: "grok_local",
   execute: grokExecute,
@@ -344,6 +385,20 @@ const grokLocalAdapter: ServerAdapterModule = {
     installCommand: null,
   }),
   agentConfigurationDoc: grokAgentConfigurationDoc,
+};
+
+const litellmLocalAdapter: ServerAdapterModule = {
+  type: "litellm_local",
+  execute: litellmExecute,
+  testEnvironment: litellmTestEnvironment,
+  sessionCodec: litellmSessionCodec,
+  sessionManagement: getAdapterSessionManagement("litellm_local") ?? undefined,
+  models: litellmModels,
+  supportsLocalAgentJwt: false,
+  supportsInstructionsBundle: true,
+  instructionsPathKey: "instructionsFilePath",
+  requiresMaterializedRuntimeSkills: false,
+  agentConfigurationDoc: litellmAgentConfigurationDoc,
 };
 
 const hermesGatewayAdapter = createHermesGatewayServerAdapter();
@@ -414,6 +469,7 @@ const pausedOverrides = new Set<string>();
 function registerBuiltInAdapters() {
   for (const adapter of [
     acpxLocalAdapter,
+    antigravityLocalAdapter,
     claudeLocalAdapter,
     codexLocalAdapter,
     openCodeLocalAdapter,
@@ -422,6 +478,7 @@ function registerBuiltInAdapters() {
     cursorLocalAdapter,
     geminiLocalAdapter,
     grokLocalAdapter,
+    litellmLocalAdapter,
     hermesGatewayAdapter,
     hermesLocalAdapter,
     openclawGatewayAdapter,

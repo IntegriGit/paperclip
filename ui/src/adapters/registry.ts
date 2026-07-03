@@ -1,11 +1,13 @@
 import type { UIAdapterModule } from "./types";
 import { acpxLocalUIAdapter } from "./acpx-local";
+import { antigravityLocalUIAdapter } from "./antigravity-local";
 import { claudeLocalUIAdapter } from "./claude-local";
 import { codexLocalUIAdapter } from "./codex-local";
 import { cursorCloudUIAdapter } from "./cursor-cloud";
 import { cursorLocalUIAdapter } from "./cursor";
 import { geminiLocalUIAdapter } from "./gemini-local";
 import { grokLocalUIAdapter } from "./grok-local";
+import { litellmLocalUIAdapter } from "./litellm-local";
 import { hermesGatewayUIAdapter } from "./hermes-gateway";
 import { hermesLocalUIAdapter } from "./hermes-local";
 import { openCodeLocalUIAdapter } from "./opencode-local";
@@ -54,11 +56,13 @@ setDynamicParserResultNotifier(notifyAdapterChange);
 function registerBuiltInUIAdapters() {
   for (const adapter of [
     acpxLocalUIAdapter,
+    antigravityLocalUIAdapter,
     claudeLocalUIAdapter,
     codexLocalUIAdapter,
     cursorCloudUIAdapter,
     geminiLocalUIAdapter,
     grokLocalUIAdapter,
+    litellmLocalUIAdapter,
     hermesGatewayUIAdapter,
     hermesLocalUIAdapter,
     openCodeLocalUIAdapter,

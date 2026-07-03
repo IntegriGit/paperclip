@@ -1,11 +1,13 @@
 import type { CLIAdapterModule } from "@paperclipai/adapter-utils";
 import { printAcpxStreamEvent } from "@paperclipai/adapter-acpx-local/cli";
+import { printAntigravityStreamEvent } from "@paperclipai/adapter-antigravity-local/cli";
 import { printClaudeStreamEvent } from "@paperclipai/adapter-claude-local/cli";
 import { printCodexStreamEvent } from "@paperclipai/adapter-codex-local/cli";
 import { printCursorStreamEvent } from "@paperclipai/adapter-cursor-local/cli";
 import { printCursorCloudEvent } from "@paperclipai/adapter-cursor-cloud/cli";
 import { printGeminiStreamEvent } from "@paperclipai/adapter-gemini-local/cli";
 import { printGrokStreamEvent } from "@paperclipai/adapter-grok-local/cli";
+import { printLiteLLMStreamEvent } from "@paperclipai/adapter-litellm-local/cli";
 import { formatStdoutEvent as printHermesGatewayStreamEvent } from "@paperclipai/hermes-paperclip-adapter/gateway/cli";
 import { printHermesStreamEvent } from "@paperclipai/hermes-paperclip-adapter/cli";
 import { printOpenCodeStreamEvent } from "@paperclipai/adapter-opencode-local/cli";
@@ -22,6 +24,11 @@ const claudeLocalCLIAdapter: CLIAdapterModule = {
 const acpxLocalCLIAdapter: CLIAdapterModule = {
   type: "acpx_local",
   formatStdoutEvent: printAcpxStreamEvent,
+};
+
+const antigravityLocalCLIAdapter: CLIAdapterModule = {
+  type: "antigravity_local",
+  formatStdoutEvent: printAntigravityStreamEvent,
 };
 
 const codexLocalCLIAdapter: CLIAdapterModule = {
@@ -59,6 +66,11 @@ const grokLocalCLIAdapter: CLIAdapterModule = {
   formatStdoutEvent: printGrokStreamEvent,
 };
 
+const litellmLocalCLIAdapter: CLIAdapterModule = {
+  type: "litellm_local",
+  formatStdoutEvent: printLiteLLMStreamEvent,
+};
+
 const hermesGatewayCLIAdapter: CLIAdapterModule = {
   type: "hermes_gateway",
   formatStdoutEvent: printHermesGatewayStreamEvent,
@@ -77,6 +89,7 @@ const openclawGatewayCLIAdapter: CLIAdapterModule = {
 const adaptersByType = new Map<string, CLIAdapterModule>(
   [
     acpxLocalCLIAdapter,
+    antigravityLocalCLIAdapter,
     claudeLocalCLIAdapter,
     codexLocalCLIAdapter,
     openCodeLocalCLIAdapter,
@@ -85,6 +98,7 @@ const adaptersByType = new Map<string, CLIAdapterModule>(
     cursorCloudCLIAdapter,
     geminiLocalCLIAdapter,
     grokLocalCLIAdapter,
+    litellmLocalCLIAdapter,
     hermesGatewayCLIAdapter,
     hermesLocalCLIAdapter,
     openclawGatewayCLIAdapter,

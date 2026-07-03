@@ -38,6 +38,7 @@ const ADAPTER_MANAGED_SESSION_POLICY: SessionCompactionPolicy = {
 
 export const LEGACY_SESSIONED_ADAPTER_TYPES = new Set([
   "acpx_local",
+  "antigravity_local",
   "claude_local",
   "codex_local",
   "cursor_cloud",
@@ -50,6 +51,11 @@ export const LEGACY_SESSIONED_ADAPTER_TYPES = new Set([
 
 export const ADAPTER_SESSION_MANAGEMENT: Record<string, AdapterSessionManagement> = {
   acpx_local: {
+    supportsSessionResume: true,
+    nativeContextManagement: "confirmed",
+    defaultSessionCompaction: ADAPTER_MANAGED_SESSION_POLICY,
+  },
+  antigravity_local: {
     supportsSessionResume: true,
     nativeContextManagement: "confirmed",
     defaultSessionCompaction: ADAPTER_MANAGED_SESSION_POLICY,
@@ -93,6 +99,13 @@ export const ADAPTER_SESSION_MANAGEMENT: Record<string, AdapterSessionManagement
     supportsSessionResume: true,
     nativeContextManagement: "confirmed",
     defaultSessionCompaction: ADAPTER_MANAGED_SESSION_POLICY,
+  },
+  litellm_local: {
+    // Raw OpenAI-compatible API: no provider-side context management, so
+    // Paperclip rotates the stored conversation by the default thresholds.
+    supportsSessionResume: true,
+    nativeContextManagement: "none",
+    defaultSessionCompaction: DEFAULT_SESSION_COMPACTION_POLICY,
   },
 };
 
