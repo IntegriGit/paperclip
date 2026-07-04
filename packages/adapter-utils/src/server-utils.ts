@@ -36,6 +36,11 @@ interface SpawnTarget {
   command: string;
   args: string[];
   cwd?: string;
+  /** Pass args to the child verbatim (no libuv re-quoting). Required when the
+   *  command is cmd.exe running a pre-quoted /c command line: libuv's default
+   *  MSVCRT quoting escapes quotes as \" which cmd.exe does not understand,
+   *  so quoted arguments (e.g. prompts with spaces) get word-split. */
+  windowsVerbatimArguments?: boolean;
   cleanup?: () => Promise<void>;
 }
 
@@ -2022,7 +2027,11 @@ async function resolveSpawnTarget(
     const commandLine = [quoteForCmd(executable), ...args.map(quoteForCmd)].join(" ");
     return {
       command: shell,
-      args: ["/d", "/s", "/c", commandLine],
+      // /s + one outer quote pair: cmd strips the outer quotes and runs the
+      // inner line exactly as quoted above. Verbatim args keep libuv from
+      // re-escaping the quotes into \" sequences cmd cannot parse.
+      args: ["/d", "/s", "/c", `"${commandLine}"`],
+      windowsVerbatimArguments: true,
     };
   }
 
@@ -2861,6 +2870,7 @@ export async function runChildProcess(
           env: mergedEnv,
           detached: process.platform !== "win32",
           shell: false,
+          windowsVerbatimArguments: target.windowsVerbatimArguments ?? false,
           stdio: [opts.stdin != null ? "pipe" : "ignore", "pipe", "pipe"],
         }) as ChildProcessWithEvents;
         const startedAt = new Date().toISOString();
