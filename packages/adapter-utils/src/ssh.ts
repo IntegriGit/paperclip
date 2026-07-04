@@ -1247,6 +1247,8 @@ export async function buildSshSpawnTarget(input: {
     .filter((entry): entry is [string, string] => typeof entry[1] === "string")
     .map(([key, value]) => `${key}=${shellQuote(value)}`);
   const remoteCommandParts = [shellQuote(input.command), ...input.args.map((arg) => shellQuote(arg))].join(" ");
+  const remoteLooksWindows = /^\/?[A-Za-z]:[\/]/.test(input.spec.remoteCwd);
+  const remoteExecPrefix = remoteLooksWindows ? "" : "exec ";
   const remoteScript = [
     'if [ -f "$HOME/.profile" ]; then . "$HOME/.profile" >/dev/null 2>&1 || true; fi',
     'if [ -f "$HOME/.bash_profile" ]; then . "$HOME/.bash_profile" >/dev/null 2>&1 || true; fi',
@@ -1254,9 +1256,15 @@ export async function buildSshSpawnTarget(input: {
     'export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"',
     '[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh" >/dev/null 2>&1 || true',
     `cd ${shellQuote(input.spec.remoteCwd)}`,
+    // MSYS/Git-Bash sshd targets cannot truly exec: bash emulates it by
+    // spawning a child and dying, which orphans the stdout/stderr pipes.
+    // The spawned process then blocks forever on its first sizable write
+    // (observed: agy frozen at ~1s CPU with an empty log). Keep the shell
+    // alive as a pipe relay on Windows-style targets; keep exec elsewhere
+    // for proper signal delivery.
     envArgs.length > 0
-      ? `exec env ${envArgs.join(" ")} ${remoteCommandParts}`
-      : `exec ${remoteCommandParts}`,
+      ? `${remoteExecPrefix}env ${envArgs.join(" ")} ${remoteCommandParts}`
+      : `${remoteExecPrefix}${remoteCommandParts}`,
   ].join(" && ");
 
   sshArgs.push(

@@ -17,6 +17,7 @@ import {
   resolveAdapterExecutionTargetTimeoutSec,
   runAdapterExecutionTargetProcess,
   runAdapterExecutionTargetShellCommand,
+  startAdapterExecutionTargetPaperclipBridge,
 } from "@paperclipai/adapter-utils/execution-target";
 import {
   asBoolean,
@@ -114,10 +115,12 @@ async function pathExists(candidate: string): Promise<boolean> {
 
 /**
  * Stage the desired Paperclip skills into the execution workspace at
- * `.gemini/antigravity/skills/<skill>` so Antigravity discovers them as project
- * skills. Staging into the workspace cwd (rather than a local tmpdir) means the
- * skills are included when the workspace is synced to a remote SSH target. The
- * staged entries are removed in cleanup so the project checkout is left clean.
+ * `.agents/skills/<skill>` so Antigravity discovers them as project skills
+ * (the workspace skills path moved from `.gemini/skills` to `.agents/skills`
+ * in the 2026-06 Antigravity CLI migration). Staging into the workspace cwd
+ * (rather than a local tmpdir) means the skills are included when the
+ * workspace is synced to a remote SSH target. The staged entries are removed
+ * in cleanup so the project checkout is left clean.
  */
 async function stageAntigravityProjectAssets(input: {
   cwd: string;
@@ -131,11 +134,9 @@ async function stageAntigravityProjectAssets(input: {
   const desiredSet = new Set(input.desiredSkillNames);
   const selected = input.skillEntries.filter((entry) => desiredSet.has(entry.key));
   if (selected.length > 0) {
-    const geminiDir = path.join(input.cwd, ".gemini");
-    const antigravityDir = path.join(geminiDir, "antigravity");
-    const skillsRoot = path.join(antigravityDir, "skills");
-    if (!(await pathExists(geminiDir))) cleanup.push({ kind: "dir", path: geminiDir });
-    else if (!(await pathExists(antigravityDir))) cleanup.push({ kind: "dir", path: antigravityDir });
+    const agentsDir = path.join(input.cwd, ".agents");
+    const skillsRoot = path.join(agentsDir, "skills");
+    if (!(await pathExists(agentsDir))) cleanup.push({ kind: "dir", path: agentsDir });
     else if (!(await pathExists(skillsRoot))) cleanup.push({ kind: "dir", path: skillsRoot });
     await fs.mkdir(skillsRoot, { recursive: true });
 
@@ -220,6 +221,8 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
     onLog,
   });
   let restoreRemoteWorkspace: (() => Promise<void>) | null = null;
+  let remoteRuntimeRootDir: string | null = null;
+  let paperclipBridge: Awaited<ReturnType<typeof startAdapterExecutionTargetPaperclipBridge>> = null;
 
   try {
     const envConfig = parseObject(config.env);
@@ -321,6 +324,7 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
       });
       restoreRemoteWorkspace = () => preparedExecutionTargetRuntime.restoreWorkspace();
       effectiveExecutionCwd = preparedExecutionTargetRuntime.workspaceRemoteDir ?? effectiveExecutionCwd;
+      remoteRuntimeRootDir = preparedExecutionTargetRuntime.runtimeRootDir ?? null;
       refreshPaperclipWorkspaceEnvForExecution({
         env,
         envConfig,
@@ -337,6 +341,25 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
     }
 
     const runtimeExecutionTarget = overrideAdapterExecutionTargetRemoteCwd(executionTarget, effectiveExecutionCwd);
+    // On remote targets PAPERCLIP_API_URL points at the server's loopback,
+    // which is unreachable from the target host. The bridge reverse-tunnels
+    // the API to the remote and rewrites the env to the tunneled endpoint —
+    // without it, the agent grinds against a dead API and can never post
+    // comments or update issues.
+    if (executionTargetIsRemote) {
+      paperclipBridge = await startAdapterExecutionTargetPaperclipBridge({
+        runId,
+        target: runtimeExecutionTarget,
+        runtimeRootDir: remoteRuntimeRootDir,
+        adapterKey: "antigravity",
+        timeoutSec,
+        hostApiToken: env.PAPERCLIP_API_KEY,
+        onLog,
+      });
+      if (paperclipBridge) {
+        Object.assign(env, paperclipBridge.env);
+      }
+    }
     const effectiveEnv = Object.fromEntries(
       Object.entries({ ...process.env, ...env }).filter(
         (entry): entry is [string, string] => typeof entry[1] === "string",
@@ -433,7 +456,7 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
       if (sandbox) notes.push("Running with --sandbox terminal restrictions.");
       if (instructionsSection) notes.push("Injected agent instructions into the prompt.");
       if (stagedAssets.stagedSkillsCount > 0) {
-        notes.push(`Staged ${stagedAssets.stagedSkillsCount} Paperclip skill(s) into .gemini/antigravity/skills.`);
+        notes.push(`Staged ${stagedAssets.stagedSkillsCount} Paperclip skill(s) into .agents/skills.`);
       }
       return notes;
     })();
@@ -492,6 +515,7 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
         graceSec,
         onSpawn,
         onLog,
+        runLogTail: paperclipBridge?.runLogTail,
       });
       const afterList = await listConversationOrder();
       const newConversationId = executionTargetIsRemote
@@ -591,6 +615,6 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
 
     return toResult(initial);
   } finally {
-    await Promise.all([restoreRemoteWorkspace?.(), stagedAssets.cleanup()]);
+    await Promise.all([paperclipBridge?.stop(), restoreRemoteWorkspace?.(), stagedAssets.cleanup()]);
   }
 }

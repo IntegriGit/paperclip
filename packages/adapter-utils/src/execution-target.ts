@@ -1135,10 +1135,16 @@ export async function startAdapterExecutionTargetPaperclipBridge(input: {
     throw new Error("Sandbox bridge mode requires a host-side Paperclip API token.");
   }
 
-  const runtimeRootDir =
+  const rawRuntimeRootDir =
     input.runtimeRootDir?.trim().length
       ? input.runtimeRootDir.trim()
       : path.posix.join(target.remoteCwd, ".paperclip-runtime", input.adapterKey);
+  // Windows ssh environments carry paths in the "/C:/..." form. The remote
+  // Git-Bash resolves that form inconsistently (cd works, `[ -s ... ]` and ls
+  // go blind on deep paths), so the readiness poll can stare straight past a
+  // ready file that node wrote successfully. Drive-colon form "C:/..." is
+  // understood by bash, node, and cygpath alike.
+  const runtimeRootDir = rawRuntimeRootDir.replace(new RegExp("^/([A-Za-z]):(/|$)"), "$1:$2");
   const bridgeRuntimeDir = path.posix.join(runtimeRootDir, "paperclip-bridge");
   const queueDir = path.posix.join(bridgeRuntimeDir, "queue");
   const assetRemoteDir = path.posix.join(bridgeRuntimeDir, "server");

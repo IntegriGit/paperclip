@@ -908,15 +908,46 @@ export async function startSandboxCallbackBridgeServer(input: {
     maxBodyBytes: input.maxBodyBytes,
   });
   const nodeCommand = input.nodeCommand?.trim() || "node";
+  // Windows OpenSSH terminates the session's job object (including nohup'd
+  // background children) as soon as the remote command returns, so the
+  // Linux-style `nohup node ... &` launch dies before it can write the
+  // ready file. On Windows remotes, create the process through WMI instead:
+  // WMI-created processes are children of WmiPrvSE, outside the ssh job,
+  // and survive session teardown. Env cannot be inherited across WMI, so
+  // the bridge env is embedded in the spawned command line.
+  const windowsEnvChain = Object.entries({
+    [SANDBOX_EXEC_CHANNEL_ENV]: SANDBOX_EXEC_CHANNEL_BRIDGE,
+    ...env,
+  })
+    .map(([key, value]) => `set \\"${key}=${String(value).replace(/"/g, "")}\\"`)
+    .join("&& ");
+  const windowsStart = [
+    `  entry_w=$(cygpath -w ${shellQuote(remoteEntrypoint)})`,
+    `  log_w=$(cygpath -w ${shellQuote(directories.logFile)})`,
+    `  node_path=$(command -v ${shellQuote(nodeCommand)} 2>/dev/null || printf '%s' ${shellQuote(nodeCommand)})`,
+    '  node_w=$(cygpath -w "$node_path")',
+    `  export PAPERCLIP_BRIDGE_CMDLINE="cmd /c ${windowsEnvChain}&& \\"$node_w\\" \\"$entry_w\\" >> \\"$log_w\\" 2>&1"`,
+    "  pid=$(MSYS_NO_PATHCONV=1 powershell.exe -NoProfile -Command " +
+      "'$r = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = $env:PAPERCLIP_BRIDGE_CMDLINE }; $r.ProcessId' " +
+      "| tr -d '\\r\\n ')",
+  ].join("\n");
   const startResult = await input.runner.execute({
     command: shellCommand,
     args: shellCommandArgs(
       [
         `mkdir -p ${shellQuote(directories.requestsDir)} ${shellQuote(directories.responsesDir)} ${shellQuote(directories.logsDir)}`,
         `rm -f ${shellQuote(directories.readyFile)} ${shellQuote(directories.pidFile)}`,
-        `nohup ${shellQuote(nodeCommand)} ${shellQuote(remoteEntrypoint)} ` +
+        // Windows OpenSSH kills the session job (nohup included) the moment
+        // the remote command returns. WMI-created processes are parented to
+        // WmiPrvSE, outside the ssh job, and survive teardown. Env cannot be
+        // inherited across WMI, so the bridge env rides in the command line.
+        `if [ "\${OS:-}" = "Windows_NT" ]; then`,
+        windowsStart,
+        "else",
+        `  nohup ${shellQuote(nodeCommand)} ${shellQuote(remoteEntrypoint)} ` +
           `>> ${shellQuote(directories.logFile)} 2>&1 < /dev/null &`,
-        "pid=$!",
+        "  pid=$!",
+        "fi",
         `printf '%s\\n' \"$pid\" > ${shellQuote(directories.pidFile)}`,
         "printf '{\"pid\":%s}\\n' \"$pid\"",
       ].join("\n"),
@@ -929,13 +960,24 @@ export async function startSandboxCallbackBridgeServer(input: {
     timeoutMs,
   });
   requireSuccessfulResult("start sandbox callback bridge", startResult);
+  if (!/\{"pid":\s*\d+\}/.test(startResult.stdout ?? "")) {
+    throw new Error(
+      "start sandbox callback bridge did not produce a pid. " +
+        `stdout: ${JSON.stringify((startResult.stdout ?? "").slice(-400))} ` +
+        `stderr: ${JSON.stringify((startResult.stderr ?? "").slice(-400))}`,
+    );
+  }
 
   const readyResult = await runShell(
     input.runner,
     input.remoteCwd,
     [
-      "i=0",
-      `while [ \"$i\" -lt 200 ]; do`,
+      // Time-based window instead of a fixed iteration count: on Windows
+      // remotes the WMI-spawned node can take 30s+ on first launch (Defender
+      // scans binaries started from an unfamiliar parent), and each MSYS
+      // `sleep` forks a real process so iteration cost varies wildly.
+      "deadline=$((SECONDS + 120))",
+      `while [ \"$SECONDS\" -lt \"$deadline\" ]; do`,
       `  if [ -s ${shellQuote(directories.readyFile)} ]; then`,
       `    cat ${shellQuote(directories.readyFile)}`,
       "    exit 0",
@@ -944,14 +986,15 @@ export async function startSandboxCallbackBridgeServer(input: {
       `    cat ${shellQuote(directories.logFile)} >&2`,
       "    exit 1",
       "  fi",
-      "  i=$((i + 1))",
-      "  sleep 0.05",
+      "  sleep 0.25",
       "done",
       `echo "Timed out waiting for bridge readiness." >&2`,
       `if [ -s ${shellQuote(directories.logFile)} ]; then cat ${shellQuote(directories.logFile)} >&2; fi`,
       "exit 1",
     ].join("\n"),
-    timeoutMs,
+    // Must outlive the 120s remote polling window regardless of the
+    // configured bridge timeout, or the host kills the poll mid-wait.
+    Math.max(timeoutMs, 150_000),
     shellCommand,
   );
   requireSuccessfulResult("wait for sandbox callback bridge readiness", readyResult);
@@ -990,7 +1033,10 @@ export async function startSandboxCallbackBridgeServer(input: {
           [
             `if [ -s ${shellQuote(directories.pidFile)} ]; then`,
             `  pid="$(cat ${shellQuote(directories.pidFile)})"`,
-            "  kill \"$pid\" 2>/dev/null || true",
+            // Windows remotes hold a native (WMI-created) pid that MSYS kill
+            // cannot signal; taskkill's dash-flag form avoids MSYS path
+            // mangling of /F-style switches.
+            "  kill \"$pid\" 2>/dev/null || taskkill -f -pid \"$pid\" >/dev/null 2>&1 || true",
             "  i=0",
             "  while kill -0 \"$pid\" 2>/dev/null && [ \"$i\" -lt 40 ]; do",
             "    i=$((i + 1))",
@@ -1019,7 +1065,14 @@ import { createServer } from "node:http";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 
-const queueDir = process.env.PAPERCLIP_BRIDGE_QUEUE_DIR;
+const rawQueueDir = process.env.PAPERCLIP_BRIDGE_QUEUE_DIR;
+// Git-Bash/MSYS remotes hand Windows paths in the "/C:/..." form; Windows
+// node resolves that against the current drive root and dies with ENOENT
+// before the ready file is ever written. Strip the leading slash of a
+// drive-letter path when running on win32.
+const queueDir = process.platform === "win32" && rawQueueDir
+  ? rawQueueDir.replace(new RegExp("^/([A-Za-z]):(/|$)"), "$1:$2")
+  : rawQueueDir;
 const bridgeToken = process.env.PAPERCLIP_BRIDGE_TOKEN;
 const host = process.env.PAPERCLIP_BRIDGE_HOST || "127.0.0.1";
 const port = Number(process.env.PAPERCLIP_BRIDGE_PORT || "0");
