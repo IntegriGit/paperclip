@@ -1,0 +1,17 @@
+{
+  "name": "Paperclip",
+  "install": "pnpm install",
+  "terminals": [
+    {
+      "name": "dev",
+      "command": "pnpm dev",
+      "description": "Paperclip dev server (Express API + Vite UI) on http://localhost:3100 using embedded PostgreSQL. Watches workspace packages and restarts on change."
+    }
+  ],
+  "ports": [
+    {
+      "name": "Paperclip app (API + UI)",
+      "port": 3100
+    }
+  ]
+}
